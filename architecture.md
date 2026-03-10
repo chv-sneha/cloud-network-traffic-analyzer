@@ -422,34 +422,443 @@ ANOMALY_THRESHOLD_REJECTS=50
 ## 🌐 Network Topology
 
 ```
+                    ┌─────────────────┐
+                    │    Internet     │
+                    └────────┬────────┘
+                             │
+                             ▼
+                    ┌─────────────────┐
+                    │ Internet Gateway│
+                    └────────┬────────┘
+                             │
+        ┌────────────────────┼────────────────────┐
+        │                    │                    │
+        │              VPC (10.0.0.0/16)          │
+        │                    │                    │
+        │    ┌───────────────┴───────────────┐    │
+        │    │                               │    │
+        │    ▼                               ▼    │
+        │ ┌─────────────────┐    ┌─────────────────┐
+        │ │ Public Subnet   │    │ Public Subnet   │
+        │ │ 10.0.1.0/24     │    │ 10.0.3.0/24     │
+        │ │ AZ: us-east-1a  │    │ AZ: us-east-1b  │
+        │ │                 │    │                 │
+        │ │ ┌─────────────┐ │    │ ┌─────────────┐ │
+        │ │ │ Web Server  │ │    │ │ Web Server  │ │
+        │ │ │ EC2/ECS     │ │    │ │ EC2/ECS     │ │
+        │ │ └─────────────┘ │    │ └─────────────┘ │
+        │ │                 │    │                 │
+        │ │ ┌─────────────┐ │    │ ┌─────────────┐ │
+        │ │ │  NAT GW     │ │    │ │  NAT GW     │ │
+        │ │ │  (HA)       │ │    │ │  (HA)       │ │
+        │ │ └──────┬──────┘ │    │ └──────┬──────┘ │
+        │ └────────┼────────┘    └────────┼────────┘
+        │          │                      │
+        │          ▼                      ▼
+        │ ┌─────────────────┐    ┌─────────────────┐
+        │ │ Private Subnet  │    │ Private Subnet  │
+        │ │ 10.0.2.0/24     │    │ 10.0.4.0/24     │
+        │ │ AZ: us-east-1a  │    │ AZ: us-east-1b  │
+        │ │                 │    │                 │
+        │ │ ┌─────────────┐ │    │ ┌─────────────┐ │
+        │ │ │ App Server  │ │    │ │ App Server  │ │
+        │ │ │ Lambda/ECS  │◄┼────┼►│ Lambda/ECS  │ │
+        │ │ └─────────────┘ │    │ └─────────────┘ │
+        │ │                 │    │                 │
+        │ │ ┌─────────────┐ │    │ ┌─────────────┐ │
+        │ │ │ RDS Primary │◄┼────┼►│ RDS Standby │ │
+        │ │ │ (Multi-AZ)  │ │    │ │ (Multi-AZ)  │ │
+        │ │ └─────────────┘ │    │ └─────────────┘ │
+        │ └─────────────────┘    └─────────────────┘
+        │                                           │
+        └───────────────────────────────────────────┘
+
+        Route Tables:
+        ┌─────────────────────────────────────────┐
+        │ Public RT: 0.0.0.0/0 → IGW             │
+        │ Private RT: 0.0.0.0/0 → NAT Gateway    │
+        └─────────────────────────────────────────┘
+```
+
+## 🔀 Traffic Flow Patterns
+
+### Inbound Traffic (Internet → VPC)
+```
+User Request
+    ↓
 Internet Gateway
-       │
-       ▼
-┌──────────────────────────────────────┐
-│         Public Subnet                │
-│         10.0.1.0/24                  │
-│                                      │
-│  ┌──────────┐      ┌──────────┐     │
-│  │  Web     │      │   NAT    │     │
-│  │  Server  │      │  Gateway │     │
-│  └──────────┘      └────┬─────┘     │
-└──────────────────────────┼───────────┘
-                           │
-                           ▼
-┌──────────────────────────────────────┐
-│         Private Subnet               │
-│         10.0.2.0/24                  │
-│                                      │
-│  ┌──────────┐      ┌──────────┐     │
-│  │   App    │      │  Database│     │
-│  │  Server  │◄────►│   (RDS)  │     │
-│  └──────────┘      └──────────┘     │
-└──────────────────────────────────────┘
+    ↓
+Public Subnet (Web Tier)
+    ↓
+Private Subnet (App Tier)
+    ↓
+Private Subnet (Database Tier)
+    ↓
+VPC Flow Logs Capture
+```
+
+### Outbound Traffic (VPC → Internet)
+```
+Private Subnet Resource
+    ↓
+NAT Gateway (Public Subnet)
+    ↓
+Internet Gateway
+    ↓
+Internet
+    ↓
+VPC Flow Logs Capture
+```
+
+### Internal Traffic (VPC → VPC)
+```
+EC2 Instance (Public)
+    ↓
+Security Group Rules
+    ↓
+RDS Instance (Private)
+    ↓
+VPC Flow Logs Capture
 ```
 
 ---
 
-**Architecture Version**: 1.0  
+## 🎯 Use Cases
+
+### 1. DDoS Attack Detection
+**Scenario**: Sudden spike in traffic from multiple IPs
+```
+Detection:
+- Packet count > 10,000/min from single IP
+- Multiple source IPs targeting single destination
+- High reject rate (>80%)
+
+Response:
+- SNS alert to security team
+- Auto-block via Security Group update
+- CloudWatch alarm triggers
+```
+
+### 2. Port Scanning Detection
+**Scenario**: Attacker probing for open ports
+```
+Detection:
+- Single IP accessing >100 unique ports
+- Sequential port access pattern
+- High reject rate on uncommon ports
+
+Response:
+- Immediate SNS alert
+- Log IP to threat database
+- Grafana dashboard highlights activity
+```
+
+### 3. Data Exfiltration Detection
+**Scenario**: Unusual outbound data transfer
+```
+Detection:
+- Bytes transferred > 10GB in 5 minutes
+- Outbound traffic to unknown IPs
+- Non-business hours activity
+
+Response:
+- Critical SNS alert
+- Lambda triggers investigation workflow
+- Automated traffic blocking
+```
+
+### 4. Compliance Monitoring
+**Scenario**: Audit trail for network access
+```
+Use:
+- Track all database access attempts
+- Monitor rejected connections
+- Generate compliance reports
+
+Benefit:
+- SOC 2 compliance evidence
+- PCI-DSS network monitoring
+- HIPAA audit trails
+```
+
+---
+
+## 🧪 Testing Scenarios
+
+### Test 1: Normal Traffic Baseline
+```bash
+# Generate normal HTTP traffic
+for i in {1..100}; do
+  curl -s http://example.com > /dev/null
+  sleep 1
+done
+
+Expected: No alerts, normal metrics in Grafana
+```
+
+### Test 2: High Volume Attack
+```bash
+# Simulate traffic spike
+for i in {1..2000}; do
+  curl -s http://target-ip &
+done
+
+Expected: SNS alert "High Traffic Volume Detected"
+```
+
+### Test 3: Port Scan Simulation
+```bash
+# Scan ports 1-1000
+nmap -p 1-1000 target-ip
+
+Expected: SNS alert "Port Scanning Detected"
+```
+
+### Test 4: Rejected Connections
+```bash
+# Attempt connections to blocked ports
+for port in {8000..8100}; do
+  nc -zv target-ip $port 2>&1
+done
+
+Expected: SNS alert "High Reject Rate"
+```
+
+---
+
+## 📊 Sample CloudWatch Queries
+
+### Query 1: Top Talkers (Most Active IPs)
+```sql
+fields @timestamp, srcaddr, dstaddr, bytes
+| stats sum(bytes) as total_bytes by srcaddr
+| sort total_bytes desc
+| limit 10
+```
+
+### Query 2: Rejected Connections
+```sql
+fields @timestamp, srcaddr, dstaddr, srcport, dstport, action
+| filter action = "REJECT"
+| stats count() by srcaddr
+| sort count desc
+```
+
+### Query 3: Traffic by Protocol
+```sql
+fields @timestamp, protocol, bytes
+| stats sum(bytes) as total by protocol
+| sort total desc
+```
+
+### Query 4: Anomaly Timeline
+```sql
+fields @timestamp, srcaddr, packets
+| filter packets > 1000
+| sort @timestamp desc
+```
+
+---
+
+## 🔧 Advanced Configuration
+
+### Custom VPC Flow Log Format
+```bash
+# Enhanced format with additional fields
+aws ec2 create-flow-logs \
+  --resource-type VPC \
+  --resource-ids vpc-xxxxx \
+  --traffic-type ALL \
+  --log-destination-type cloud-watch-logs \
+  --log-group-name /aws/vpc/flowlogs \
+  --log-format '${version} ${account-id} ${interface-id} ${srcaddr} ${dstaddr} ${srcport} ${dstport} ${protocol} ${packets} ${bytes} ${start} ${end} ${action} ${log-status} ${vpc-id} ${subnet-id} ${instance-id} ${tcp-flags} ${type} ${pkt-srcaddr} ${pkt-dstaddr}'
+```
+
+### Lambda Environment Variables
+```bash
+# Configure thresholds
+aws lambda update-function-configuration \
+  --function-name TrafficAnalyzer \
+  --environment Variables="{
+    SNS_TOPIC_ARN=arn:aws:sns:us-east-1:123456789012:traffic-alerts,
+    THRESHOLD_PACKETS=1000,
+    THRESHOLD_REJECTS=50,
+    THRESHOLD_PORTS=100,
+    BLACKLIST_IPS='203.0.113.0/24,198.51.100.0/24',
+    ALERT_EMAIL=admin@example.com,
+    ENABLE_AUTO_BLOCK=true
+  }"
+```
+
+### CloudWatch Metric Filters
+```bash
+# Create metric for rejected connections
+aws logs put-metric-filter \
+  --log-group-name /aws/vpc/flowlogs \
+  --filter-name RejectedConnections \
+  --filter-pattern '[version, account, eni, source, destination, srcport, destport, protocol, packets, bytes, windowstart, windowend, action=REJECT, flowlogstatus]' \
+  --metric-transformations \
+    metricName=RejectedConnectionCount,\
+    metricNamespace=VPC/Traffic,\
+    metricValue=1
+```
+
+---
+
+## 🚀 Performance Optimization
+
+### Lambda Optimization
+```python
+# Use connection pooling
+import boto3
+from functools import lru_cache
+
+@lru_cache(maxsize=1)
+def get_sns_client():
+    return boto3.client('sns')
+
+# Batch processing
+def process_logs_batch(records, batch_size=100):
+    for i in range(0, len(records), batch_size):
+        batch = records[i:i+batch_size]
+        analyze_batch(batch)
+```
+
+### CloudWatch Logs Optimization
+```bash
+# Set appropriate retention
+aws logs put-retention-policy \
+  --log-group-name /aws/vpc/flowlogs \
+  --retention-in-days 7
+
+# Export old logs to S3 for archival
+aws logs create-export-task \
+  --log-group-name /aws/vpc/flowlogs \
+  --from 1609459200000 \
+  --to 1612137600000 \
+  --destination s3-bucket-name \
+  --destination-prefix vpc-flow-logs/
+```
+
+---
+
+## 📈 Grafana Dashboard Queries
+
+### Panel 1: Traffic Volume Over Time
+```
+Metric: NetworkPackets
+Statistic: Sum
+Period: 1 minute
+Dimensions: VPC-ID
+```
+
+### Panel 2: Top 10 Source IPs
+```
+Query: 
+fields srcaddr, sum(packets) as total
+| stats sum(packets) by srcaddr
+| sort total desc
+| limit 10
+```
+
+### Panel 3: Accept/Reject Ratio
+```
+Metric: ConnectionAction
+Statistic: Sum
+Dimensions: Action (ACCEPT/REJECT)
+Visualization: Pie Chart
+```
+
+### Panel 4: Geographic Distribution
+```
+Query: 
+fields srcaddr, geo_ip(srcaddr) as location
+| stats count() by location
+Visualization: World Map
+```
+
+---
+
+## 🔐 Security Best Practices
+
+### 1. Least Privilege IAM
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "logs:PutLogEvents"
+    ],
+    "Resource": "arn:aws:logs:us-east-1:123456789012:log-group:/aws/vpc/flowlogs:*"
+  }]
+}
+```
+
+### 2. Encryption at Rest
+```bash
+# Enable KMS encryption for CloudWatch Logs
+aws logs associate-kms-key \
+  --log-group-name /aws/vpc/flowlogs \
+  --kms-key-id arn:aws:kms:us-east-1:123456789012:key/xxxxx
+```
+
+### 3. VPC Endpoints
+```bash
+# Create VPC endpoint for CloudWatch Logs
+aws ec2 create-vpc-endpoint \
+  --vpc-id vpc-xxxxx \
+  --service-name com.amazonaws.us-east-1.logs \
+  --route-table-ids rtb-xxxxx
+```
+
+### 4. Network Segmentation
+- Isolate database tier in private subnets
+- Use Security Groups for micro-segmentation
+- Implement NACLs for subnet-level filtering
+- Enable VPC Flow Logs on all ENIs
+
+---
+
+## 💰 Cost Analysis
+
+### Monthly Cost Breakdown (1M packets/day)
+
+| Service | Usage | Unit Cost | Monthly Cost |
+|---------|-------|-----------|-------------|
+| VPC Flow Logs | 30 GB/month | $0.50/GB | $15.00 |
+| CloudWatch Logs Storage | 20 GB/month | $0.50/GB | $10.00 |
+| Lambda Invocations | 30K/month | $0.20/1M | $0.01 |
+| Lambda Duration | 1.5M GB-sec | $0.0000166667/GB-sec | $0.25 |
+| SNS Notifications | 100/month | $0.50/1M | $0.01 |
+| CloudWatch Metrics | 10 custom | $0.30/metric | $3.00 |
+| Data Transfer | 5 GB/month | $0.09/GB | $0.45 |
+| **TOTAL** | | | **$28.72** |
+
+### Cost Optimization Tips
+1. Reduce log retention to 3 days: Save $5/month
+2. Filter logs before CloudWatch: Save $7/month
+3. Use S3 for long-term storage: Save $8/month
+4. Batch Lambda invocations: Save $0.10/month
+
+---
+
+## 🎓 Learning Resources
+
+### AWS Documentation
+- [VPC Flow Logs Guide](https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs.html)
+- [Lambda Best Practices](https://docs.aws.amazon.com/lambda/latest/dg/best-practices.html)
+- [CloudWatch Logs Insights](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/AnalyzingLogData.html)
+
+### Related Projects
+- AWS GuardDuty for threat detection
+- AWS Security Hub for centralized security
+- AWS Network Firewall for advanced filtering
+
+---
+
+**Architecture Version**: 2.0  
 **Last Updated**: 2024  
 **Region**: us-east-1  
-**Maintained By**: Cloud Security Team
+**Maintained By**: Cloud Security Team  
+**License**: MIT
