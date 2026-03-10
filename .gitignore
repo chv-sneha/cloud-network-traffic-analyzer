@@ -1,0 +1,16 @@
+# AWS credentials - NEVER commit these
+.aws/
+*.pem
+*.key
+terraform.tfstate
+terraform.tfstate.backup
+.terraform/
+*.tfvars
+
+# Python
+__pycache__/
+*.pyc
+.env
+
+# Mac
+.DS_Store

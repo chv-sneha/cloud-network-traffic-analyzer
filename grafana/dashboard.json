@@ -1,0 +1,94 @@
+{
+  "dashboard": {
+    "title": "Cloud Network Traffic Analyzer",
+    "tags": ["network", "security", "aws"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Total Network Traffic (Bytes)",
+        "type": "graph",
+        "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "datasource": "CloudWatch",
+            "namespace": "VPCFlowLogs",
+            "metricName": "BytesTransferred",
+            "dimensions": {},
+            "statistics": ["Sum"],
+            "period": "60"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Accepted vs Rejected Traffic",
+        "type": "piechart",
+        "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "datasource": "CloudWatch",
+            "namespace": "VPCFlowLogs",
+            "metricName": "AcceptedConnections",
+            "statistics": ["Sum"],
+            "period": "60"
+          },
+          {
+            "datasource": "CloudWatch",
+            "namespace": "VPCFlowLogs",
+            "metricName": "RejectedConnections",
+            "statistics": ["Sum"],
+            "period": "60"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Anomaly Detection Events",
+        "type": "stat",
+        "gridPos": { "x": 0, "y": 8, "w": 8, "h": 4 },
+        "targets": [
+          {
+            "datasource": "CloudWatch",
+            "namespace": "VPCFlowLogs",
+            "metricName": "AnomaliesDetected",
+            "statistics": ["Sum"],
+            "period": "300"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Top Source IPs",
+        "type": "table",
+        "gridPos": { "x": 8, "y": 8, "w": 16, "h": 4 },
+        "targets": [
+          {
+            "datasource": "CloudWatch",
+            "namespace": "VPCFlowLogs",
+            "metricName": "TrafficPerIP",
+            "statistics": ["Sum"],
+            "period": "300"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Network Usage Trend (Last 24h)",
+        "type": "timeseries",
+        "gridPos": { "x": 0, "y": 12, "w": 24, "h": 8 },
+        "targets": [
+          {
+            "datasource": "CloudWatch",
+            "namespace": "VPCFlowLogs",
+            "metricName": "BytesTransferred",
+            "statistics": ["Average"],
+            "period": "3600"
+          }
+        ]
+      }
+    ],
+    "time": { "from": "now-24h", "to": "now" },
+    "refresh": "1m"
+  }
+}
