@@ -129,97 +129,53 @@ cloud-network-traffic-analyzer/
 
 ---
 
-## 🚀 Deployment Steps
+## 🚀 Deployment Guide
 
 ### Prerequisites
 - AWS Account with appropriate permissions
-- AWS CLI configured
+- AWS CLI configured with credentials
 - Python 3.9+
-- Grafana installed (local or cloud)
+- Grafana (local or cloud instance)
+- Basic understanding of AWS networking
 
-### Step 1: Create VPC & Enable Flow Logs
+### Architecture Components
 
-```bash
-# Create VPC
-aws ec2 create-vpc --cidr-block 10.0.0.0/16 --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=TrafficAnalyzerVPC}]'
+This system consists of five main components:
 
-# Create CloudWatch Log Group
-aws logs create-log-group --log-group-name /aws/vpc/flowlogs
+1. **VPC with Flow Logs** - Captures all network traffic
+2. **CloudWatch Log Group** - Stores and streams flow logs
+3. **Lambda Function** - Analyzes traffic for anomalies
+4. **SNS Topic** - Sends alert notifications
+5. **Grafana Dashboard** - Visualizes traffic metrics
 
-# Enable VPC Flow Logs
-aws ec2 create-flow-logs \
-  --resource-type VPC \
-  --resource-ids <VPC_ID> \
-  --traffic-type ALL \
-  --log-destination-type cloud-watch-logs \
-  --log-group-name /aws/vpc/flowlogs \
-  --deliver-logs-permission-arn <IAM_ROLE_ARN>
-```
+### Deployment Overview
 
-### Step 2: Deploy Lambda Function
+The deployment process involves:
+- Setting up VPC infrastructure with flow logs enabled
+- Configuring CloudWatch for log aggregation
+- Deploying Lambda function with anomaly detection logic
+- Creating SNS topic for alerting
+- Connecting Grafana to CloudWatch for visualization
 
-```bash
-# Create IAM role for Lambda
-aws iam create-role --role-name LambdaTrafficAnalyzer \
-  --assume-role-policy-document file://trust-policy.json
+For detailed deployment instructions, refer to the [architecture.md](architecture.md) file.
 
-# Attach policies
-aws iam attach-role-policy --role-name LambdaTrafficAnalyzer \
-  --policy-arn arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+### Configuration
 
-aws iam attach-role-policy --role-name LambdaTrafficAnalyzer \
-  --policy-arn arn:aws:iam::aws:policy/AmazonSNSFullAccess
+**Lambda Environment Variables:**
+- `SNS_TOPIC_ARN` - ARN of the SNS topic for alerts
+- `ANOMALY_THRESHOLD_PACKETS` - Packet threshold (default: 1000)
+- `ANOMALY_THRESHOLD_REJECTS` - Reject threshold (default: 50)
 
-# Package and deploy Lambda
-cd lambda
-zip function.zip analyzer.py
-aws lambda create-function \
-  --function-name TrafficAnalyzer \
-  --runtime python3.9 \
-  --role <LAMBDA_ROLE_ARN> \
-  --handler analyzer.lambda_handler \
-  --zip-file fileb://function.zip
-```
+**VPC Flow Logs Settings:**
+- Traffic Type: ALL (accepted + rejected)
+- Destination: CloudWatch Logs
+- Log Format: Default AWS format
+- Aggregation Interval: 1 minute
 
-### Step 3: Configure SNS Alerts
-
-```bash
-# Create SNS topic
-aws sns create-topic --name traffic-alerts
-
-# Subscribe email
-aws sns subscribe \
-  --topic-arn <SNS_TOPIC_ARN> \
-  --protocol email \
-  --notification-endpoint your-email@example.com
-
-# Update Lambda environment variable
-aws lambda update-function-configuration \
-  --function-name TrafficAnalyzer \
-  --environment Variables={SNS_TOPIC_ARN=<SNS_TOPIC_ARN>}
-```
-
-### Step 4: Set CloudWatch Trigger
-
-```bash
-# Add CloudWatch Logs trigger to Lambda
-aws logs put-subscription-filter \
-  --log-group-name /aws/vpc/flowlogs \
-  --filter-name LambdaTrigger \
-  --filter-pattern "" \
-  --destination-arn <LAMBDA_FUNCTION_ARN>
-```
-
-### Step 5: Setup Grafana Dashboard
-
-1. Install Grafana CloudWatch plugin:
-   ```bash
-   grafana-cli plugins install cloudwatch
-   ```
-
-2. Add CloudWatch as data source in Grafana UI
-3. Import `grafana/dashboard.json`
-4. Configure AWS credentials with read access to CloudWatch
+**IAM Permissions Required:**
+- VPC Flow Logs: CloudWatch Logs write access
+- Lambda: CloudWatch Logs read/write, SNS publish
+- Grafana: CloudWatch read-only access
 
 ---
 
@@ -255,29 +211,38 @@ The Lambda function detects:
 - 📊 **Observability**: Grafana dashboards for traffic visualization
 - 🔐 **Security Monitoring**: Threat detection and anomaly identification
 
-## 🧪 Testing
+## 🧪 Testing & Validation
+
+### Verify Deployment
+
+1. **Check VPC Flow Logs**
+   - Verify logs are streaming to CloudWatch
+   - Confirm log format and data accuracy
+
+2. **Test Lambda Function**
+   - Monitor Lambda invocations in CloudWatch
+   - Check execution logs for errors
+   - Verify anomaly detection logic
+
+3. **Validate SNS Alerts**
+   - Confirm email subscription
+   - Test alert delivery
+
+4. **Review Grafana Dashboard**
+   - Verify data source connection
+   - Check metric visualization
+   - Confirm real-time updates
 
 ### Generate Test Traffic
 
-```bash
-# SSH into EC2 instance in VPC
-ssh ec2-user@<EC2_PUBLIC_IP>
+You can generate test traffic patterns to validate the system:
 
-# Generate normal traffic
-ping -c 100 8.8.8.8
+- **Normal Traffic**: Regular HTTP/HTTPS requests
+- **High Volume**: Burst of concurrent connections
+- **Port Scanning**: Sequential port access attempts
+- **Rejected Connections**: Requests to blocked ports
 
-# Simulate port scan (triggers anomaly)
-nmap -p 1-1000 <TARGET_IP>
-
-# Generate high volume traffic
-for i in {1..2000}; do curl http://example.com; done
-```
-
-### Verify Alerts
-
-1. Check email for SNS notifications
-2. View Lambda logs: `aws logs tail /aws/lambda/TrafficAnalyzer --follow`
-3. Monitor Grafana dashboard for traffic spikes
+Monitor the Grafana dashboard and email alerts to confirm detection.
 
 ---
 
@@ -319,27 +284,21 @@ Contributions welcome! Please open an issue or submit a pull request.
 
 MIT License - feel free to use this project for learning and portfolio purposes.
 
-## ⚠️ Cleanup
+## ⚠️ Resource Cleanup
 
-To avoid AWS charges, delete these resources after demo:
+To avoid ongoing AWS charges, remove all resources after testing:
 
-```bash
-# Delete Lambda function
-aws lambda delete-function --function-name TrafficAnalyzer
+### Cleanup Checklist
 
-# Delete SNS topic
-aws sns delete-topic --topic-arn <SNS_TOPIC_ARN>
+- [ ] Delete Lambda function
+- [ ] Remove SNS topic and subscriptions
+- [ ] Delete CloudWatch Log Group
+- [ ] Disable and delete VPC Flow Logs
+- [ ] Remove VPC and associated resources (subnets, route tables, etc.)
+- [ ] Delete IAM roles and policies
 
-# Delete CloudWatch Log Group
-aws logs delete-log-group --log-group-name /aws/vpc/flowlogs
-
-# Delete VPC Flow Logs
-aws ec2 delete-flow-logs --flow-log-ids <FLOW_LOG_ID>
-
-# Delete VPC (after removing dependencies)
-aws ec2 delete-vpc --vpc-id <VPC_ID>
-```
+**Important**: Delete resources in reverse order of creation to avoid dependency errors.
 
 ---
 
-**Built with ❤️ for cloud security and network monitoring**
+**Cloud Network Traffic Analyzer** - A professional AWS-based security monitoring solution
